@@ -1,40 +1,51 @@
 from django.shortcuts import get_object_or_404, render, redirect
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 from .models import Course, Lesson, Question, Choice, Submission, Enrollment
 
-def submit(request, course_id):
-    enrollment = Enrollment.objects.get(user=request.user, course_id=course_id)
-    if request.method == 'POST':
+def course_details(request, course_id):
+    context = {}
+    try:
         course = Course.objects.get(pk=course_id)
-        selected_ids = []
-        for key in request.POST:
-            if key.startswith('choice_'):
-                choice_id = request.POST.get(key)
-                selected_ids.append(choice_id)
+        context['course'] = course
+    except Course.DoesNotExist:
+        raise Http404("Course does not exist")
+    return render(request, 'onlinecourse/course_details_bootstrap.html', context)
 
+def submit(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    
+    
+    if request.method == 'POST':
+        # Enrollment get kar rahe hain ya create kar rahe hain current user ke liye
+        enrollment, created = Enrollment.objects.get_or_create(
+            user=request.user,
+            course=course
+        )
+        
+       
         submission = Submission.objects.create(enrollment=enrollment)
-        choices = Choice.objects.filter(id__in=selected_ids)
-        submission.choices.set(choices)
-        submission.save()
-
-        return redirect('onlinecourse:show_exam_result', course_id=course_id, submission_id=submission.id)
+        
+        
+        choice_ids = request.POST.getlist('choice')
+        for choice_id in choice_ids:
+            choice = Choice.objects.get(pk=choice_id)
+            submission.choices.add(choice)
+            
+        return HttpResponseRedirect(reverse('onlinecourse:show_exam_result', args=(course.id, submission.id)))
+    
+    return redirect('onlinecourse:course_details', course_id=course.id)
 
 def show_exam_result(request, course_id, submission_id):
     context = {}
-    course = Course.objects.get(pk=course_id)
-    submission = Submission.objects.get(pk=submission_id)
-
-    score = 0
-    total_score = 0
-    questions = Question.objects.filter(lesson__course=course)
-
-    for question in questions:
-        total_score += question.grade
-        selected_choices = submission.choices.filter(question=question)
-        if question.is_get_score(selected_choices):
-            score += question.grade
-
+    course = get_object_or_404(Course, pk=course_id)
+    submission = get_object_or_404(Submission, pk=submission_id)
+    
+   
+    selected_ids = submission.choices.values_list('id', flat=True)
+    
     context['course'] = course
     context['submission'] = submission
-    context['grade'] = score
-    context['total_score'] = total_score
+    context['selected_ids'] = selected_ids  # Context mein add kar diya gaya hai
+    
     return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
